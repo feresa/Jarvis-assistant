@@ -29,12 +29,10 @@ export class CalendarService {
         if (trimmed.startsWith('{')) {
           credentials = JSON.parse(trimmed);
         } else {
-          // Decode from base64 if encoded
           const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
           credentials = JSON.parse(decoded);
         }
 
-        // Sanitize private_key to fix Vercel escaped newlines (\\n -> \n)
         if (credentials.private_key && typeof credentials.private_key === 'string') {
           credentials.private_key = credentials.private_key
             .replace(/\\n/g, '\n')
@@ -74,24 +72,55 @@ export class CalendarService {
   }
 
   /**
-   * List events between timeMin and timeMax
+   * List events across ALL calendars accessible by the Service Account
    */
   async listEvents(timeMin: Date, timeMax: Date) {
-    const calendarId = process.env.GOOGLE_CALENDAR_ID || config.google.calendarId || 'primary';
+    const primaryId = process.env.GOOGLE_CALENDAR_ID || config.google.calendarId || 'primary';
+    
+    // Collect all calendar IDs to query
+    const targetCalendarIds = new Set<string>();
+    targetCalendarIds.add(primaryId);
+
     try {
-      console.log(`[CalendarService] Listing events for calendarId=${calendarId} from ${timeMin.toISOString()} to ${timeMax.toISOString()}`);
-      const response = await this.calendar.events.list({
-        calendarId: calendarId,
-        timeMin: timeMin.toISOString(),
-        timeMax: timeMax.toISOString(),
-        singleEvents: true,
-        orderBy: 'startTime',
-      });
-      return response.data.items || [];
-    } catch (error: any) {
-      console.error('[CalendarService] Error listing events:', error?.message || error);
-      throw error;
+      const listRes = await this.calendar.calendarList.list();
+      const userCalendars = listRes.data.items || [];
+      for (const cal of userCalendars) {
+        if (cal.id) {
+          targetCalendarIds.add(cal.id);
+        }
+      }
+    } catch (e: any) {
+      console.warn('[CalendarService] Could not fetch calendarList, falling back to primary:', e?.message || e);
     }
+
+    console.log(`[CalendarService] Searching across ${targetCalendarIds.size} calendar(s)...`);
+
+    const allEvents: any[] = [];
+
+    for (const calId of targetCalendarIds) {
+      try {
+        const response = await this.calendar.events.list({
+          calendarId: calId,
+          timeMin: timeMin.toISOString(),
+          timeMax: timeMax.toISOString(),
+          singleEvents: true,
+          orderBy: 'startTime',
+        });
+        const items = response.data.items || [];
+        allEvents.push(...items);
+      } catch (error: any) {
+        console.warn(`[CalendarService] Skipping calendar "${calId}":`, error?.message || error);
+      }
+    }
+
+    // Sort combined events by startTime
+    allEvents.sort((a, b) => {
+      const startA = new Date(a.start?.dateTime || a.start?.date || 0).getTime();
+      const startB = new Date(b.start?.dateTime || b.start?.date || 0).getTime();
+      return startA - startB;
+    });
+
+    return allEvents;
   }
 
   /**
