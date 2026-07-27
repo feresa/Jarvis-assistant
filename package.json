@@ -2,12 +2,11 @@
   "name": "jarvis-ai-assistant",
   "version": "1.0.0",
   "description": "Jarvis - Personal AI Schedule Executive Assistant for LINE & Google Calendar",
-  "main": "dist/index.js",
+  "main": "api/index.ts",
   "type": "module",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
+    "start": "tsx api/index.ts",
+    "dev": "tsx watch api/index.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

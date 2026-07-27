@@ -3,10 +3,48 @@ import { config } from '../config.js';
 import { calendarService } from './calendar.js';
 
 export class GeminiService {
-  private genAI: GoogleGenerativeAI;
+  private getGenAI(): GoogleGenerativeAI {
+    const apiKey = process.env.GEMINI_API_KEY || config.gemini.apiKey;
+    if (!apiKey) {
+      console.error('[GeminiService] GEMINI_API_KEY is missing!');
+    }
+    return new GoogleGenerativeAI(apiKey);
+  }
 
-  constructor() {
-    this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
+  /**
+   * Helper to generate content with automatic model fallback
+   */
+  private async generateWithFallback(genAI: GoogleGenerativeAI, prompt: string, systemInstruction: string): Promise<string> {
+    const candidateModels = [
+      'gemini-3.6-flash',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-3-flash-preview',
+    ];
+
+    let lastError: any = null;
+
+    for (const modelName of candidateModels) {
+      try {
+        console.log(`[GeminiService] Trying model: ${modelName}`);
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction,
+        });
+
+        const result = await model.generateContent(prompt);
+        const text = result.response.text();
+        if (text) {
+          console.log(`[GeminiService] Successfully generated response using model: ${modelName}`);
+          return text;
+        }
+      } catch (err: any) {
+        console.warn(`[GeminiService] Model ${modelName} failed:`, err?.message || err);
+        lastError = err;
+      }
+    }
+
+    throw lastError || new Error('All candidate Gemini models failed.');
   }
 
   /**
@@ -20,7 +58,7 @@ export class GeminiService {
 你的目標是幫使用者查詢、管理 Google Calendar 行程，並給予清楚、有條理且親切的回覆。
 
 當使用者詢問行程時，你需要判斷意圖：
-1. 【查詢行程】：如果使用者詢問「今天/明天/這週/指定日期」的行程，請分析需求並指明日期區間。
+1. 【查詢行程】：如果使用者詢問「今天/這週/指定日期」的行程，請分析需求並指明日期區間。
 2. 【新增行程】：如果使用者想新增會議/行程，請提出時間、標題與地點。
 3. 【一般對話/提醒】：若是一般交談或設定提醒，請給予溫暖專業的回覆。
 
@@ -28,12 +66,9 @@ export class GeminiService {
     `;
 
     try {
-      const model = this.genAI.getGenerativeModel({
-        model: 'gemini-1.5-flash',
-        systemInstruction,
-      });
+      const genAI = this.getGenAI();
 
-      const prompt = `
+      const decisionPrompt = `
 使用者對話："${userPrompt}"
 
 請分析使用者的對話意圖，如果需要查詢或新增日曆，請輸出相應指令：
@@ -42,8 +77,7 @@ export class GeminiService {
 - 若為一般聊天，請輸出 JSON：{"action": "chat"}
       `;
 
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.text();
+      const responseText = await this.generateWithFallback(genAI, decisionPrompt, systemInstruction);
       console.log('[GeminiService] AI Decision Raw:', responseText);
 
       // Extract JSON if present
@@ -53,12 +87,13 @@ export class GeminiService {
           const decision = JSON.parse(jsonMatch[0]);
 
           if (decision.action === 'query') {
-            const timeMin = new Date(decision.start || now);
-            const timeMax = new Date(decision.end || new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000));
+            const timeMin = decision.start ? new Date(decision.start) : now;
+            const timeMax = decision.end ? new Date(decision.end) : new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+            
             const events = await calendarService.listEvents(timeMin, timeMax);
 
             if (events.length === 0) {
-              return `📅 查詢時間區間 (${timeMin.toLocaleDateString('zh-TW')} - ${timeMax.toLocaleDateString('zh-TW')}) 內目前沒有預定的行程！相當輕鬆喔 ✨`;
+              return `📅 查詢時間區間 (${timeMin.toLocaleDateString('zh-TW')} ~ ${timeMax.toLocaleDateString('zh-TW')}) 內目前沒有預定的行程！相當輕鬆喔 ✨`;
             }
 
             const eventsListText = events
@@ -83,17 +118,17 @@ export class GeminiService {
 
             return `✨ 已成功為您在 Google Calendar 新增行程！\n\n📌 **標題**：${newEvent.summary}\n⏰ **時間**：${new Date(newEvent.start.dateTime).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}${newEvent.location ? `\n📍 **地點**：${newEvent.location}` : ''}`;
           }
-        } catch (e) {
-          console.error('[GeminiService] JSON parse or execution failed:', e);
+        } catch (e: any) {
+          console.error('[GeminiService] Inner action execution failed:', e?.message || e);
+          return `⚠️ 在存取您的 Google Calendar 時發生錯誤，請確認日曆權限與設定。 (${e?.message || 'Unknown Error'})`;
         }
       }
 
-      // Fallback to normal response
-      const chatResult = await model.generateContent(userPrompt);
-      return chatResult.response.text() || 'Jarvis 隨時為您服務！';
-    } catch (error) {
-      console.error('[GeminiService] Error processing message:', error);
-      return '抱歉，Jarvis 目前處理您的要求時遇到了點問題，請稍後再試一次！';
+      // Fallback to normal chat response
+      return await this.generateWithFallback(genAI, userPrompt, systemInstruction);
+    } catch (error: any) {
+      console.error('[GeminiService] Error processing message:', error?.stack || error?.message || error);
+      return `抱歉，Jarvis 目前處理您的要求時遇到了點問題：${error?.message || '請稍後再試一次！'}`;
     }
   }
 }

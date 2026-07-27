@@ -14,28 +14,57 @@ export class CalendarService {
   private calendar: any;
 
   constructor() {
+    this.initAuth();
+  }
+
+  private initAuth() {
     let auth;
-    // Support Vercel env variable stringified JSON OR local credentials.json file
-    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+
+    if (rawKey && rawKey.trim().length > 0) {
       try {
-        const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+        let credentials: any;
+        const trimmed = rawKey.trim();
+
+        if (trimmed.startsWith('{')) {
+          credentials = JSON.parse(trimmed);
+        } else {
+          // Decode from base64 if encoded
+          const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+          credentials = JSON.parse(decoded);
+        }
+
+        // Sanitize private_key to fix Vercel escaped newlines (\\n -> \n)
+        if (credentials.private_key && typeof credentials.private_key === 'string') {
+          credentials.private_key = credentials.private_key
+            .replace(/\\n/g, '\n')
+            .replace(/\r\n/g, '\n');
+        }
+
         auth = new google.auth.GoogleAuth({
           credentials,
           scopes: ['https://www.googleapis.com/auth/calendar'],
         });
-      } catch (e) {
-        console.error('[CalendarService] Failed to parse GOOGLE_SERVICE_ACCOUNT_KEY env var:', e);
+        console.log('[CalendarService] Successfully initialized Google Auth with credentials for:', credentials.client_email);
+      } catch (e: any) {
+        console.error('[CalendarService] Error parsing GOOGLE_SERVICE_ACCOUNT_KEY:', e?.message || e);
       }
     }
 
     if (!auth && fs.existsSync(config.google.keyFilePath)) {
-      auth = new google.auth.GoogleAuth({
-        keyFile: config.google.keyFilePath,
-        scopes: ['https://www.googleapis.com/auth/calendar'],
-      });
+      try {
+        auth = new google.auth.GoogleAuth({
+          keyFile: config.google.keyFilePath,
+          scopes: ['https://www.googleapis.com/auth/calendar'],
+        });
+        console.log('[CalendarService] Authenticated via keyFile.');
+      } catch (e: any) {
+        console.error('[CalendarService] Error loading keyFile:', e?.message || e);
+      }
     }
 
     if (!auth) {
+      console.warn('[CalendarService] Falling back to default Google Auth.');
       auth = new google.auth.GoogleAuth({
         scopes: ['https://www.googleapis.com/auth/calendar'],
       });
@@ -48,17 +77,19 @@ export class CalendarService {
    * List events between timeMin and timeMax
    */
   async listEvents(timeMin: Date, timeMax: Date) {
+    const calendarId = process.env.GOOGLE_CALENDAR_ID || config.google.calendarId || 'primary';
     try {
+      console.log(`[CalendarService] Listing events for calendarId=${calendarId} from ${timeMin.toISOString()} to ${timeMax.toISOString()}`);
       const response = await this.calendar.events.list({
-        calendarId: config.google.calendarId,
+        calendarId: calendarId,
         timeMin: timeMin.toISOString(),
         timeMax: timeMax.toISOString(),
         singleEvents: true,
         orderBy: 'startTime',
       });
       return response.data.items || [];
-    } catch (error) {
-      console.error('[CalendarService] Error listing events:', error);
+    } catch (error: any) {
+      console.error('[CalendarService] Error listing events:', error?.message || error);
       throw error;
     }
   }
@@ -67,9 +98,11 @@ export class CalendarService {
    * Create a new event on Google Calendar
    */
   async createEvent(eventInput: CalendarEventInput) {
+    const calendarId = process.env.GOOGLE_CALENDAR_ID || config.google.calendarId || 'primary';
     try {
+      console.log(`[CalendarService] Creating event "${eventInput.summary}" on calendarId=${calendarId}`);
       const response = await this.calendar.events.insert({
-        calendarId: config.google.calendarId,
+        calendarId: calendarId,
         requestBody: {
           summary: eventInput.summary,
           description: eventInput.description || '',
@@ -85,8 +118,8 @@ export class CalendarService {
         },
       });
       return response.data;
-    } catch (error) {
-      console.error('[CalendarService] Error creating event:', error);
+    } catch (error: any) {
+      console.error('[CalendarService] Error creating event:', error?.message || error);
       throw error;
     }
   }
@@ -95,14 +128,15 @@ export class CalendarService {
    * Delete event by eventId
    */
   async deleteEvent(eventId: string) {
+    const calendarId = process.env.GOOGLE_CALENDAR_ID || config.google.calendarId || 'primary';
     try {
       await this.calendar.events.delete({
-        calendarId: config.google.calendarId,
+        calendarId: calendarId,
         eventId: eventId,
       });
       return true;
-    } catch (error) {
-      console.error('[CalendarService] Error deleting event:', error);
+    } catch (error: any) {
+      console.error('[CalendarService] Error deleting event:', error?.message || error);
       throw error;
     }
   }

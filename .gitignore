@@ -1,2 +1,8 @@
-.vercel
+node_modules
+dist
+.env
 .env*
+credentials.json
+.vercel
+scratch/
+.DS_Store
