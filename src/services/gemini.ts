@@ -53,26 +53,27 @@ export class GeminiService {
   async processUserMessage(userPrompt: string): Promise<string> {
     const now = new Date();
     const systemInstruction = `
-你是 Jarvis，使用者的專屬 AI 行程總管與個人特助。
+你是 Jarvis，使用者的專屬 AI 個人特助，這份報告是要貼心回覆或報告給使用者的女朋友（蛙蛙大大）聽的。
 現在時間是：${now.toISOString()} (${now.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })})。
-你的目標是幫使用者查詢、管理 Google Calendar 及 iCloud 行程，並給予清楚、有條理且親切溫馨的回覆。
 
-【行程報告格式範本要求】：
-當使用者詢問「這週行程」或要求行程整理時，請比照以下格式輸出：
+【風格要求】：
+請使用超級可愛、貼心、甜美且溫馨的語氣（多用 💕, ✨, 🌸, 🧸, 🐱, 💖 等可愛表情符號）。
 
-這週行程報告蛙蛙大大 💕
+【二種查詢模式的格式規範】：
 
-週一 MM/DD：[早上...，下午...，晚上...]
-週二 MM/DD：...
-週三 MM/DD：...
-週四 MM/DD：...
-週五 MM/DD：...
-週六 MM/DD：...
-週日 MM/DD：...
+1. 【一週/多日行程報告】（例如詢問「這週行程」、「本週行程」）：
+   - 標題必須是：這週行程報告蛙蛙大大 💕
+   - **完全不要寫出具體點鐘時間**（例如不要寫 14:30、18:00）！
+   - 依據當天時間，歸納簡化為「上午」、「下午」、「晚上」。
+   - 範例格式：
+     週一 7/27：下午工作，晚上團練 ✨
+     週二 7/28：下午工作坊，晚上開會 🌸
+     週三 7/29：上午登山，晚上休息 🌕
+   - 若某天完全沒有行程，寫「無排定行程，可以好好約會/休息放鬆喔 🧸」。
 
-如某天完全沒有行程，可寫「無排定行程，好好休息 ✨」。
-
-請用繁體中文回覆，語氣親切專業。
+2. 【單日行程報告】（例如詢問「今天」、「明天」、「後天」或特定某一天）：
+   - **必須標示出具體時間點**（例如：15:00 - 16:00 健身房 🏋️‍♂️）。
+   - 給予詳細且貼心的提醒。
     `;
 
     try {
@@ -82,7 +83,7 @@ export class GeminiService {
 使用者對話："${userPrompt}"
 
 請分析使用者的對話意圖，如果需要查詢或新增日曆，請輸出相應指令：
-- 若為查詢日曆，請計算開始時間 (start) 與結束時間 (end) 的 ISO 字串，並在第一行輸出 JSON：{"action": "query", "start": "...", "end": "..."}
+- 若為查詢日曆，請計算開始時間 (start) 與結束時間 (end) 的 ISO 字串，並判斷是否為單日查詢 (isSingleDay: true/false)，輸出 JSON：{"action": "query", "start": "...", "end": "...", "isSingleDay": true/false}
 - 若為新增日曆，請輸出 JSON：{"action": "create", "summary": "...", "start": "...", "end": "...", "location": "..."}
 - 若為一般聊天，請輸出 JSON：{"action": "chat"}
       `;
@@ -103,18 +104,25 @@ export class GeminiService {
             const events = await calendarService.listEvents(timeMin, timeMax);
 
             if (events.length === 0) {
-              return `這週行程報告蛙蛙大大 💕\n\n目前查詢時間區間內沒有排定任何行程，可以好好休息放鬆喔 ✨`;
+              return `這週行程報告蛙蛙大大 💕\n\n目前沒有排定任何行程，可以好好放鬆約會喔 🧸✨`;
             }
 
             const formatPrompt = `
 使用者詢問："${userPrompt}"
+是否為單日查詢：${decision.isSingleDay ? '是 (要寫出具體時間點)' : '否 (這是週報告，絕對不要寫數字點鐘時間，只寫上午/下午/晚上)'}
+
 查詢到的行程列表資料如下：
 ${JSON.stringify(events, null, 2)}
 
-請依據系統指令的【行程報告格式範本要求】，將以上行程整理為最漂亮、清晰的週行程報告：
-標題必須包含：這週行程報告蛙蛙大大 💕
-每日按照 週一 ~ 週日 順序排列，並標註月/日（例如 週一 7/27）。
-將上午/下午/晚上的行程順暢組合在同一行。
+請嚴格依據系統指令規範整理：
+1. 若非單日查詢（週報告）：
+   - 標題：這週行程報告蛙蛙大大 💕
+   - 依 週一 ~ 週日 順序。
+   - **嚴禁顯示具體數字點鐘時間**，只能歸納成「上午...」、「下午...」、「晚上...」。
+   - 語氣無敵可愛甜美！
+
+2. 若為單日查詢（今天/明天/後天）：
+   - 清楚列出具體開始與結束時間、標題與地點，語氣貼心可愛！
             `;
 
             return await this.generateWithFallback(genAI, formatPrompt, systemInstruction);
@@ -128,11 +136,11 @@ ${JSON.stringify(events, null, 2)}
               location: decision.location,
             });
 
-            return `✨ 已成功為您在 Google Calendar 新增行程！\n\n📌 **標題**：${newEvent.summary}\n⏰ **時間**：${new Date(newEvent.start.dateTime).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}${newEvent.location ? `\n📍 **地點**：${newEvent.location}` : ''}`;
+            return `✨ 已成功為蛙蛙大大新增行程囉！💕\n\n📌 **標題**：${newEvent.summary}\n⏰ **時間**：${new Date(newEvent.start.dateTime).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}${newEvent.location ? `\n📍 **地點**：${newEvent.location}` : ''}`;
           }
         } catch (e: any) {
           console.error('[GeminiService] Inner action execution failed:', e?.message || e);
-          return `⚠️ 在存取您的日曆時發生錯誤，請稍後再試。 (${e?.message || 'Unknown Error'})`;
+          return `⚠️ 存取日曆時遇到一點問題，請稍後再試喔！ (${e?.message || 'Unknown Error'})`;
         }
       }
 
