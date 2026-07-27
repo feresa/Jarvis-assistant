@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { config } from '../config.js';
 import fs from 'fs';
+import ical from 'node-ical';
 
 export interface CalendarEventInput {
   summary: string;
@@ -72,12 +73,52 @@ export class CalendarService {
   }
 
   /**
-   * List events across ALL calendars accessible by the Service Account
+   * Fetch and parse events from external iCal (.ics / webcal://) URLs
+   */
+  private async fetchICalEvents(urlsStr: string, timeMin: Date, timeMax: Date): Promise<any[]> {
+    const events: any[] = [];
+    const urls = urlsStr.split(',').map(u => u.trim()).filter(Boolean);
+
+    for (const url of urls) {
+      try {
+        const httpUrl = url.replace(/^webcal:\/\//i, 'https://');
+        console.log(`[CalendarService] Fetching iCal feed from: ${httpUrl}`);
+        const parsed: any = await ical.async.fromURL(httpUrl);
+
+        for (const k in parsed) {
+          const item = parsed[k];
+          if (item && item.type === 'VEVENT') {
+            const start = new Date(item.start);
+            const end = item.end ? new Date(item.end) : start;
+
+            if (start <= timeMax && end >= timeMin) {
+              events.push({
+                summary: item.summary || '未命名行程',
+                description: item.description || '',
+                location: item.location || '',
+                start: {
+                  dateTime: start.toISOString(),
+                },
+                end: {
+                  dateTime: end.toISOString(),
+                },
+              });
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[CalendarService] Error fetching iCal URL (${url}):`, err?.message || err);
+      }
+    }
+
+    return events;
+  }
+
+  /**
+   * List events across Google Calendar and external iCal subscriptions
    */
   async listEvents(timeMin: Date, timeMax: Date) {
     const primaryId = process.env.GOOGLE_CALENDAR_ID || config.google.calendarId || 'primary';
-    
-    // Collect all calendar IDs to query
     const targetCalendarIds = new Set<string>();
     targetCalendarIds.add(primaryId);
 
@@ -93,10 +134,9 @@ export class CalendarService {
       console.warn('[CalendarService] Could not fetch calendarList, falling back to primary:', e?.message || e);
     }
 
-    console.log(`[CalendarService] Searching across ${targetCalendarIds.size} calendar(s)...`);
-
     const allEvents: any[] = [];
 
+    // 1. Fetch Google Calendar events
     for (const calId of targetCalendarIds) {
       try {
         const response = await this.calendar.events.list({
@@ -111,6 +151,13 @@ export class CalendarService {
       } catch (error: any) {
         console.warn(`[CalendarService] Skipping calendar "${calId}":`, error?.message || error);
       }
+    }
+
+    // 2. Fetch external iCal (.ics / webcal://) subscription URLs if configured
+    const icalUrls = process.env.PUBLIC_ICAL_URLS;
+    if (icalUrls) {
+      const extraEvents = await this.fetchICalEvents(icalUrls, timeMin, timeMax);
+      allEvents.push(...extraEvents);
     }
 
     // Sort combined events by startTime
