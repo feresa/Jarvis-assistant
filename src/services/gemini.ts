@@ -55,14 +55,24 @@ export class GeminiService {
     const systemInstruction = `
 你是 Jarvis，使用者的專屬 AI 行程總管與個人特助。
 現在時間是：${now.toISOString()} (${now.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })})。
-你的目標是幫使用者查詢、管理 Google Calendar 行程，並給予清楚、有條理且親切的回覆。
+你的目標是幫使用者查詢、管理 Google Calendar 及 iCloud 行程，並給予清楚、有條理且親切溫馨的回覆。
 
-當使用者詢問行程時，你需要判斷意圖：
-1. 【查詢行程】：如果使用者詢問「今天/這週/指定日期」的行程，請分析需求並指明日期區間。
-2. 【新增行程】：如果使用者想新增會議/行程，請提出時間、標題與地點。
-3. 【一般對話/提醒】：若是一般交談或設定提醒，請給予溫暖專業的回覆。
+【行程報告格式範本要求】：
+當使用者詢問「這週行程」或要求行程整理時，請比照以下格式輸出：
 
-請用繁體中文回覆，格式清晰，善用表情符號（如 📅, ⏰, 📍, ✨）。
+這週行程報告蛙蛙大大 💕
+
+週一 MM/DD：[早上...，下午...，晚上...]
+週二 MM/DD：...
+週三 MM/DD：...
+週四 MM/DD：...
+週五 MM/DD：...
+週六 MM/DD：...
+週日 MM/DD：...
+
+如某天完全沒有行程，可寫「無排定行程，好好休息 ✨」。
+
+請用繁體中文回覆，語氣親切專業。
     `;
 
     try {
@@ -93,19 +103,21 @@ export class GeminiService {
             const events = await calendarService.listEvents(timeMin, timeMax);
 
             if (events.length === 0) {
-              return `📅 查詢時間區間 (${timeMin.toLocaleDateString('zh-TW')} ~ ${timeMax.toLocaleDateString('zh-TW')}) 內目前沒有預定的行程！相當輕鬆喔 ✨`;
+              return `這週行程報告蛙蛙大大 💕\n\n目前查詢時間區間內沒有排定任何行程，可以好好休息放鬆喔 ✨`;
             }
 
-            const eventsListText = events
-              .map((e: any) => {
-                const startStr = e.start?.dateTime
-                  ? new Date(e.start.dateTime).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                  : e.start?.date || '';
-                return `• ${startStr} - ${e.summary}${e.location ? ` (📍 ${e.location})` : ''}`;
-              })
-              .join('\n');
+            const formatPrompt = `
+使用者詢問："${userPrompt}"
+查詢到的行程列表資料如下：
+${JSON.stringify(events, null, 2)}
 
-            return `📅 為您查詢到以下行程：\n\n${eventsListText}\n\n如有任何變更隨時告訴我！`;
+請依據系統指令的【行程報告格式範本要求】，將以上行程整理為最漂亮、清晰的週行程報告：
+標題必須包含：這週行程報告蛙蛙大大 💕
+每日按照 週一 ~ 週日 順序排列，並標註月/日（例如 週一 7/27）。
+將上午/下午/晚上的行程順暢組合在同一行。
+            `;
+
+            return await this.generateWithFallback(genAI, formatPrompt, systemInstruction);
           }
 
           if (decision.action === 'create') {
@@ -120,11 +132,10 @@ export class GeminiService {
           }
         } catch (e: any) {
           console.error('[GeminiService] Inner action execution failed:', e?.message || e);
-          return `⚠️ 在存取您的 Google Calendar 時發生錯誤，請確認日曆權限與設定。 (${e?.message || 'Unknown Error'})`;
+          return `⚠️ 在存取您的日曆時發生錯誤，請稍後再試。 (${e?.message || 'Unknown Error'})`;
         }
       }
 
-      // Fallback to normal chat response
       return await this.generateWithFallback(genAI, userPrompt, systemInstruction);
     } catch (error: any) {
       console.error('[GeminiService] Error processing message:', error?.stack || error?.message || error);
