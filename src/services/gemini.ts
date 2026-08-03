@@ -57,20 +57,17 @@ export class GeminiService {
 你是 Jarvis，使用者的專屬 AI 個人特助，這份報告是要貼心回覆或報告給使用者的女朋友（蛙蛙大大）聽的。
 現在時間是：${now.toISOString()} (${now.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })})。
 
-【風格要求】：
-請使用超級可愛、貼心、甜美且溫馨的語氣（多用 💕, ✨, 🌸, 🧸, 🐱, 💖 等可愛表情符號）。
-
 【二種查詢模式的格式規範】：
 
 1. 【一週/多日行程報告】（例如詢問「這週行程」、「本週行程」）：
    - 標題必須是：這週行程報告蛙蛙大大 💕
-   - **完全不要寫出具體點鐘時間**（例如不要寫 14:30、18:00）！
-   - 依據當天時間，歸納簡化為「上午」、「下午」、「晚上」。
+   - 每天用最簡潔簡短的格式描述，例如：「早上OO，下午XX，晚上OO」，中間用逗號隔開。
+   - **完全不要寫出具體點鐘時間**（絕對不要出現 14:30、18:00）！
    - 範例格式：
-     週一 7/27：下午工作，晚上團練 ✨
-     週二 7/28：下午工作坊，晚上開會 🌸
-     週三 7/29：上午登山，晚上休息 🌕
-   - 若某天完全沒有行程，寫「無排定行程，可以好好約會/休息放鬆喔 🧸」。
+     週一 7/27：早上工作，下午運動，晚上團練
+     週二 7/28：下午工作坊，晚上明智大C
+     週三 7/29：早上登山，晚上休息
+   - 若某天完全沒有行程，寫「無排定行程，好好休息」。
 
 2. 【單日行程報告】（例如詢問「今天」、「明天」、「後天」或特定某一天）：
    - **必須標示出具體時間點**（例如：15:00 - 16:00 健身房 🏋️‍♂️）。
@@ -105,12 +102,12 @@ export class GeminiService {
             const events = await calendarService.listEvents(timeMin, timeMax);
 
             if (events.length === 0) {
-              return `這週行程報告蛙蛙大大 💕\n\n目前沒有排定任何行程，可以好好放鬆約會喔 🧸✨`;
+              return `這週行程報告蛙蛙大大 💕\n\n目前沒有排定任何行程，好好休息放鬆喔 ✨`;
             }
 
             const formatPrompt = `
 使用者詢問："${userPrompt}"
-是否為單日查詢：${decision.isSingleDay ? '是 (要寫出具體時間點)' : '否 (這是週報告，絕對不要寫數字點鐘時間，只寫上午/下午/晚上)'}
+是否為單日查詢：${decision.isSingleDay ? '是 (要寫出具體時間點)' : '否 (這是週報告，絕對不要寫數字點鐘時間，只用最簡潔格式：早上OO，下午XX，晚上OO)'}
 
 查詢到的行程列表資料如下：
 ${JSON.stringify(events, null, 2)}
@@ -119,11 +116,11 @@ ${JSON.stringify(events, null, 2)}
 1. 若非單日查詢（週報告）：
    - 標題：這週行程報告蛙蛙大大 💕
    - 依 週一 ~ 週日 順序。
-   - **嚴禁顯示具體數字點鐘時間**，只能歸納成「上午...」、「下午...」、「晚上...」。
-   - 語氣無敵可愛甜美！
+   - 每天格式最簡潔，只用「早上OO，下午XX，晚上OO」敘述即可，不要加過多無關的廢話。
+   - **嚴禁顯示具體數字點鐘時間**。
 
 2. 若為單日查詢（今天/明天/後天）：
-   - 清楚列出具體開始與結束時間、標題與地點，語氣貼心可愛！
+   - 清楚列出具體開始與結束時間、標題與地點。
             `;
 
             return await this.generateWithFallback(genAI, formatPrompt, systemInstruction);
@@ -137,7 +134,7 @@ ${JSON.stringify(events, null, 2)}
               location: decision.location,
             });
 
-            return `✨ 已成功為蛙蛙大大新增行程囉！💕\n\n📌 **標題**：${newEvent.summary}\n⏰ **時間**：${new Date(newEvent.start.dateTime).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}${newEvent.location ? `\n📍 **地點**：${newEvent.location}` : ''}`;
+            return `✨ 已成功新增行程！💕\n\n📌 **標題**：${newEvent.summary}\n⏰ **時間**：${new Date(newEvent.start.dateTime).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}${newEvent.location ? `\n📍 **地點**：${newEvent.location}` : ''}`;
           }
         } catch (e: any) {
           console.error('[GeminiService] Inner action execution failed:', e?.message || e);
