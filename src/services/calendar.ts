@@ -73,7 +73,7 @@ export class CalendarService {
   }
 
   /**
-   * Fetch and parse events from external iCal (.ics / webcal://) URLs
+   * Fetch and parse events from external iCal (.ics / webcal://) URLs with RRULE expansion
    */
   private async fetchICalEvents(urlsStr: string, timeMin: Date, timeMax: Date): Promise<any[]> {
     const events: any[] = [];
@@ -87,7 +87,29 @@ export class CalendarService {
 
         for (const k in parsed) {
           const item = parsed[k];
-          if (item && item.type === 'VEVENT') {
+          if (!item || item.type !== 'VEVENT') continue;
+
+          // Expand recurring events (RRULE)
+          if (item.rrule) {
+            try {
+              const dates = item.rrule.between(timeMin, timeMax);
+              const duration = item.end ? new Date(item.end).getTime() - new Date(item.start).getTime() : 3600000;
+              for (const d of dates) {
+                const start = new Date(d);
+                const end = new Date(d.getTime() + duration);
+                events.push({
+                  summary: item.summary || '未命名行程',
+                  description: item.description || '',
+                  location: item.location || '',
+                  start: { dateTime: start.toISOString() },
+                  end: { dateTime: end.toISOString() },
+                });
+              }
+            } catch (err: any) {
+              console.warn(`[CalendarService] RRULE error for "${item.summary}":`, err?.message || err);
+            }
+          } else {
+            // Single event
             const start = new Date(item.start);
             const end = item.end ? new Date(item.end) : start;
 
@@ -96,12 +118,8 @@ export class CalendarService {
                 summary: item.summary || '未命名行程',
                 description: item.description || '',
                 location: item.location || '',
-                start: {
-                  dateTime: start.toISOString(),
-                },
-                end: {
-                  dateTime: end.toISOString(),
-                },
+                start: { dateTime: start.toISOString() },
+                end: { dateTime: end.toISOString() },
               });
             }
           }
