@@ -16,10 +16,11 @@ export class GeminiService {
    */
   private async generateWithFallback(genAI: GoogleGenerativeAI, prompt: string, systemInstruction: string): Promise<string> {
     const candidateModels = [
-      'gemini-3.6-flash',
-      'gemini-2.0-flash',
-      'gemini-2.0-flash-lite',
       'gemini-3-flash-preview',
+      'gemini-3.6-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-2.0-flash',
+      'gemini-flash-latest',
     ];
 
     let lastError: any = null;
